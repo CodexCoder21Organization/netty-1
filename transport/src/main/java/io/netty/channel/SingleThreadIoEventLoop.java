@@ -298,6 +298,11 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
 
     private void registerForIo0(final IoHandle handle, Promise<IoRegistration> promise) {
         assert inEventLoop();
+        if (isShutdown()) {
+            promise.setFailure(new java.util.concurrent.RejectedExecutionException(
+                    "Cannot register IO handle " + handle + " because the event loop has shut down"));
+            return;
+        }
         final IoRegistration registration;
         try {
             registration = ioHandler.register(handle);
@@ -317,7 +322,14 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
     @Override
     protected final void cleanup() {
         assert inEventLoop();
-        ioHandler.destroy();
+        // Shutdown can begin while tasks are running, after run() checked its state.
+        // The final task drain can also register another channel. Close those
+        // registrations before destroying their IO handler and completing termination.
+        try {
+            ioHandler.prepareToDestroy();
+        } finally {
+            ioHandler.destroy();
+        }
     }
 
     @Override
